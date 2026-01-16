@@ -1,104 +1,240 @@
+// const express = require("express");
+// const http = require("http");
+// const { Server } = require("socket.io");
+// const cors = require("cors");
+
+// const app = express();
+// app.use(cors());
+
+// const server = http.createServer(app);
+
+// const io = new Server(server, {
+//   cors: { origin: "http://localhost:5173", methods: ["GET", "POST"] },
+// });
+
+// let rooms = {};
+
+// io.on("connection", (socket) => {
+//   console.log(`User Connected: ${socket.id}`);
+
+//   // 1. Create Room (Host)
+//   socket.on("create_room", (roomCode) => {
+//     if (rooms[roomCode]) {
+//       socket.emit("error_message", "Room already exists! Try another code.");
+//       return;
+//     }
+
+//     // Create room with this socket as HOST
+//     rooms[roomCode] = {
+//       host: socket.id,       // Track who is admin
+//       players: [socket.id],
+//       readyPlayers: [],
+//       turn: null,
+//       marked: [],
+//       gameActive: false
+//     };
+
+//     socket.join(roomCode);
+//     socket.emit("room_created", { room: roomCode, isHost: true }); // Tell client they are host
+//     console.log(`Room ${roomCode} created by ${socket.id}`);
+//   });
+
+//   // 2. Join Room (Player 2)
+//   socket.on("join_room", (roomCode) => {
+//     const room = rooms[roomCode];
+
+//     if (!room) {
+//       socket.emit("error_message", "Room does not exist!");
+//       return;
+//     }
+
+//     if (room.players.length >= 2) {
+//       socket.emit("error_message", "Room is full!");
+//       return;
+//     }
+
+//     socket.join(roomCode);
+//     room.players.push(socket.id);
+    
+//     // Tell client they joined successfully (isHost: false)
+//     socket.emit("room_joined", { room: roomCode, isHost: false });
+    
+//     // Notify everyone in room that P2 is here
+//     io.to(roomCode).emit("players_connected");
+//     console.log(`User ${socket.id} joined Room ${roomCode}`);
+//   });
+
+//   // 3. Mark Ready
+//   socket.on("player_ready", (roomCode) => {
+//     const room = rooms[roomCode];
+//     if (room) {
+//       if (!room.readyPlayers.includes(socket.id)) {
+//         room.readyPlayers.push(socket.id);
+//       }
+
+//       // If BOTH are ready
+//       if (room.readyPlayers.length === 2) {
+//         // Send specific event to HOST to enable the Start Button
+//         io.to(room.host).emit("host_can_start");
+//         // Send message to JOINER to wait
+//         const joiner = room.players.find(id => id !== room.host);
+//         if (joiner) {
+//           io.to(joiner).emit("waiting_for_host");
+//         }
+//       }
+//     }
+//   });
+
+//   // 4. Start Game (Only Host can trigger this)
+//   socket.on("request_start_game", (roomCode) => {
+//     const room = rooms[roomCode];
+    
+//     // Security check: Only host can start
+//     if (room && socket.id === room.host && !room.gameActive) {
+//       room.gameActive = true;
+      
+//       // Random first turn
+//       const firstPlayer = room.players[Math.floor(Math.random() * 2)];
+//       room.turn = firstPlayer;
+      
+//       io.to(roomCode).emit("game_start", { startTurn: firstPlayer });
+//     }
+//   });
+
+//   // 5. Moves
+//   socket.on("send_move", (data) => {
+//     const { room, number } = data;
+//     const roomData = rooms[room];
+
+//     if (roomData && socket.id === roomData.turn) {
+//       roomData.marked.push(number);
+//       const nextTurn = roomData.players.find((id) => id !== socket.id);
+//       roomData.turn = nextTurn;
+//       io.to(room).emit("receive_move", { number, nextTurn });
+//     }
+//   });
+
+//   // 6. Win
+//   socket.on("game_won", ({ room }) => {
+//     socket.to(room).emit("opponent_won");
+//     if (rooms[room]) delete rooms[room]; // Cleanup room after game
+//   });
+// });
+
+// server.listen(3001, () => {
+//   console.log("SERVER RUNNING ON PORT 3001");
+// });
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const cors = require("cors");
 
 const app = express();
+app.use(cors());
+
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: { origin: "*" },
+  cors: {
+    origin: "*", // Allow connection from any URL (for now)
+    methods: ["GET", "POST"],
+  },
 });
 
-const SIZE = 5;
-
-let players = {};      // { socketId: { board, ready } }
-let readyPlayers = 0;
-let currentTurn = null;
-let calledNumbers = [];
-
-function generateBoard() {
-  const nums = Array.from({ length: SIZE * SIZE }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
-  let k = 0;
-  return Array.from({ length: SIZE }, () =>
-    Array.from({ length: SIZE }, () => nums[k++])
-  );
-}
-
-function checkWin(marked) {
-  let lines = 0;
-
-  // rows
-  for (let i = 0; i < SIZE; i++) if (marked[i].every(Boolean)) lines++;
-
-  // columns
-  for (let j = 0; j < SIZE; j++) {
-    let col = true;
-    for (let i = 0; i < SIZE; i++) if (!marked[i][j]) col = false;
-    if (col) lines++;
-  }
-
-  // diagonals
-  let d1 = true, d2 = true;
-  for (let i = 0; i < SIZE; i++) {
-    if (!marked[i][i]) d1 = false;
-    if (!marked[i][SIZE - i - 1]) d2 = false;
-  }
-  if (d1) lines++;
-  if (d2) lines++;
-
-  return lines >= 5;
-}
+let rooms = {};
 
 io.on("connection", (socket) => {
-  console.log("Player connected:", socket.id);
-  players[socket.id] = { board: generateBoard(), ready: false };
+  console.log(`User Connected: ${socket.id}`);
 
-  // Send initial board
-  socket.emit("init", { board: players[socket.id].board });
+  // 1. Create Room
+  socket.on("create_room", (roomCode) => {
+    if (rooms[roomCode]) {
+      socket.emit("error_message", "Room already exists! Try another code.");
+      return;
+    }
+    rooms[roomCode] = {
+      host: socket.id,
+      players: [socket.id],
+      readyPlayers: [],
+      turn: null,
+      marked: [],
+      gameActive: false
+    };
+    socket.join(roomCode);
+    socket.emit("room_created", { room: roomCode, isHost: true });
+    console.log(`Room ${roomCode} created by ${socket.id}`);
+  });
 
-  // Player clicks ready/start
-  socket.on("ready", () => {
-    players[socket.id].ready = true;
-    readyPlayers++;
+  // 2. Join Room
+  socket.on("join_room", (roomCode) => {
+    const room = rooms[roomCode];
+    if (!room) {
+      socket.emit("error_message", "Room does not exist!");
+      return;
+    }
+    if (room.players.length >= 2) {
+      socket.emit("error_message", "Room is full!");
+      return;
+    }
+    socket.join(roomCode);
+    room.players.push(socket.id);
+    socket.emit("room_joined", { room: roomCode, isHost: false });
+    io.to(roomCode).emit("players_connected");
+    console.log(`User ${socket.id} joined Room ${roomCode}`);
+  });
 
-    // Start game if all players are ready
-    const allReady = Object.values(players).every((p) => p.ready);
-    if (allReady) {
-      const playerIds = Object.keys(players);
-      currentTurn = playerIds[Math.floor(Math.random() * playerIds.length)];
-      calledNumbers = [];
-      io.emit("start_game", { turn: currentTurn });
+  // 3. Mark Ready
+  socket.on("player_ready", (roomCode) => {
+    const room = rooms[roomCode];
+    if (room) {
+      if (!room.readyPlayers.includes(socket.id)) {
+        room.readyPlayers.push(socket.id);
+      }
+      if (room.readyPlayers.length === 2) {
+        io.to(room.host).emit("host_can_start");
+        const joiner = room.players.find(id => id !== room.host);
+        if (joiner) io.to(joiner).emit("waiting_for_host");
+      }
     }
   });
 
-  // Player calls a number
-  socket.on("call_number", (number) => {
-    if (socket.id !== currentTurn) return;
-
-    calledNumbers.push(number);
-
-    // Broadcast called number
-    io.emit("number_called", { number });
-
-    // Rotate turn
-    const playerIds = Object.keys(players);
-    const idx = playerIds.indexOf(socket.id);
-    currentTurn = playerIds[(idx + 1) % playerIds.length];
+  // 4. Start Game
+  socket.on("request_start_game", (roomCode) => {
+    const room = rooms[roomCode];
+    if (room && socket.id === room.host && !room.gameActive) {
+      room.gameActive = true;
+      const firstPlayer = room.players[Math.floor(Math.random() * 2)];
+      room.turn = firstPlayer;
+      io.to(roomCode).emit("game_start", { startTurn: firstPlayer });
+    }
   });
 
-  // Player declares win
-  socket.on("win", () => {
-    io.emit("winner", socket.id === currentTurn ? "YOU_WIN" : "OPPONENT_WIN");
+  // 5. Moves
+  socket.on("send_move", (data) => {
+    const { room, number } = data;
+    const roomData = rooms[room];
+    if (roomData && socket.id === roomData.turn) {
+      roomData.marked.push(number);
+      const nextTurn = roomData.players.find((id) => id !== socket.id);
+      roomData.turn = nextTurn;
+      io.to(room).emit("receive_move", { number, nextTurn });
+    }
   });
 
-  // Disconnect
+  // 6. Win
+  socket.on("game_won", ({ room }) => {
+    socket.to(room).emit("opponent_won");
+    if (rooms[room]) delete rooms[room];
+  });
+  
   socket.on("disconnect", () => {
-    console.log("Player disconnected:", socket.id);
-    delete players[socket.id];
-    readyPlayers = Object.values(players).filter((p) => p.ready).length;
+    // Cleanup logic if needed
   });
 });
 
-const PORT = process.env.PORT || 4000;
+// IMPORTANT: Use process.env.PORT for Render
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log("✅ Bingo server running on port", PORT);
+  console.log(`SERVER RUNNING ON PORT ${PORT}`);
 });
