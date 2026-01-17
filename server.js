@@ -116,7 +116,6 @@
 //   console.log(`SERVER RUNNING ON PORT ${PORT}`);
 // });
 
-
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -132,7 +131,7 @@ const server = http.createServer(app);
 // 2. Enable CORS for Socket.io
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow ALL connections (Easiest fix for now)
+    origin: "*", // Allow ALL connections (Phone, Vercel, Localhost)
     methods: ["GET", "POST"]
   },
 });
@@ -142,6 +141,7 @@ let rooms = {};
 io.on("connection", (socket) => {
   console.log(`User Connected: ${socket.id}`);
 
+  // --- 1. Create Room ---
   socket.on("create_room", (roomCode) => {
     if (rooms[roomCode]) {
       socket.emit("error_message", "Room already exists!");
@@ -160,6 +160,7 @@ io.on("connection", (socket) => {
     console.log(`Room ${roomCode} created`);
   });
 
+  // --- 2. Join Room ---
   socket.on("join_room", (roomCode) => {
     const room = rooms[roomCode];
     if (!room) {
@@ -177,6 +178,7 @@ io.on("connection", (socket) => {
     console.log(`User joined ${roomCode}`);
   });
 
+  // --- 3. Player Ready ---
   socket.on("player_ready", (roomCode) => {
     const room = rooms[roomCode];
     if (room) {
@@ -191,6 +193,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // --- 4. Start Game ---
   socket.on("request_start_game", (roomCode) => {
     const room = rooms[roomCode];
     if (room && socket.id === room.host && !room.gameActive) {
@@ -201,11 +204,12 @@ io.on("connection", (socket) => {
     }
   });
 
+  // --- 5. Emojis ---
   socket.on("send_emoji", ({ room, emoji }) => {
-    // Broadcast to everyone in the room INCLUDING sender (so they see their own animation)
     io.to(room).emit("receive_emoji", emoji);
   });
 
+  // --- 6. Moves ---
   socket.on("send_move", (data) => {
     const { room, number } = data;
     const roomData = rooms[room];
@@ -217,9 +221,33 @@ io.on("connection", (socket) => {
     }
   });
 
+  // --- 7. Reset Game (Play Again) ---
+  socket.on("reset_game", ({ room }) => {
+    const roomData = rooms[room];
+    if (roomData) {
+      roomData.marked = [];
+      roomData.gameActive = false;
+      roomData.readyPlayers = []; 
+      roomData.turn = null; 
+      
+      io.to(room).emit("game_reset");
+      console.log(`Game in Room ${room} reset for rematch.`);
+    }
+  });
+
+  // --- 8. Game Won ---
   socket.on("game_won", ({ room }) => {
     socket.to(room).emit("opponent_won");
-    if (rooms[room]) delete rooms[room];
+    
+    // ⚠️ IMPORTANT FIX: DO NOT DELETE THE ROOM HERE
+    // if (rooms[room]) delete rooms[room];  <-- I removed this line
+    // We keep the room alive so players can click "Play Again"
+  });
+
+  // --- Cleanup on Disconnect ---
+  socket.on("disconnect", () => {
+    console.log("User Disconnected", socket.id);
+    // You can add logic here to delete the room ONLY if both players leave
   });
 });
 
